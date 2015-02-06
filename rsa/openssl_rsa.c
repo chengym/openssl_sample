@@ -209,7 +209,25 @@ static uint8_t key_coefficient[128] = {
     0xc3, 0xe4, 0x41, 0x5a, 0x0f, 0x40, 0x25, 0x1c,
     0xda, 0x56, 0x4e, 0x70, 0x70, 0x0f, 0x0b, 0xea
 };
-static void _openssl_dump(char *s, uint8_t *buf, uint32_t size)
+
+static void _openssl_random_dump(char *s, uint8_t *buf, uint32_t size)
+{
+    uint32_t i;
+
+    assert(s);
+    assert(buf);
+
+    printf("dump %s\n", s);
+    for (i = 0; i < size; i++) {
+        if (0 == (i & 0x7) && i)
+            printf("\n");
+
+        printf("0x%02x ", *(buf + i));
+    }
+    printf("\n\n");
+}
+
+static void _openssl_block_dump(char *s, uint8_t *buf, uint32_t size)
 {
     uint32_t i;
     uint32_t round = size >> 4;
@@ -375,7 +393,7 @@ static int _openssl_rsa_signature(uint8_t *sig, uint32_t *size)
     return 0;
 }
 
-int main(void)
+static void _openssl_rsa_signature_verify()
 {
     int         ret;
     uint8_t     ctext[256];
@@ -386,17 +404,126 @@ int main(void)
         printf("PKCS #1 v1.5, OpenSSL Signature OK\n");
     } else {
         printf("PKCS #1 v1.5, OpenSSL Signature Fail\n");
-        return -1;
     }
 
-    _openssl_dump("signature", ctext, size);
+    _openssl_block_dump("signature", ctext, size);
 
     ret = _openssl_rsa_verify(ctext, size);
     if (0 == ret) {
-        printf("PKCS #1 v1.5, TEE Signature, OpenSSL verify OK\n");
+        printf("PKCS #1 v1.5, OpenSSL verify OK\n");
     } else {
-        printf("PKCS #1 v1.5, TEE Signature, OpenSSL verify Fail\n");
+        printf("PKCS #1 v1.5, OpenSSL verify Fail\n");
     }
+}
+
+
+#define SetKey \
+    key->n = BN_bin2bn(n, 256, key->n); \
+    key->e = BN_bin2bn(e, 256, key->e); \
+    key->d = BN_bin2bn(d, 256, key->d); \
+    key->p = BN_bin2bn(p, 128, key->p); \
+    key->q = BN_bin2bn(q, 128, key->q); \
+    key->dmp1 = BN_bin2bn(dmp1, 128, key->dmp1); \
+    key->dmq1 = BN_bin2bn(dmq1, 128, key->dmq1); \
+    key->iqmp = BN_bin2bn(iqmp, 128, key->iqmp);
+
+static void convert_key(RSA *key, uint32_t *key_len)
+{
+    static unsigned char *n = keyMod1;
+    static unsigned char *e = keyPubExp1;
+    static unsigned char *d = keyPrivExp1;
+    static unsigned char *p = key_prime1;
+    static unsigned char *q = key_prime2;
+    static unsigned char *dmp1 = key_exponent1;
+    static unsigned char *dmq1 = key_exponent2;
+    static unsigned char *iqmp = key_coefficient;
+
+    SetKey;
+    *key_len = 256;
+}
+
+static int _openssl_rsa_encrypt(uint8_t *out, uint32_t *size)
+{
+    int         err = 0;
+    int         num;
+    uint32_t    clen = 0;
+    RSA         *key;
+
+    assert(out);
+    assert(size);
+
+    key = RSA_new();
+    convert_key(key, &clen);
+    key->flags |= RSA_FLAG_NO_CONSTTIME;
+
+    num = RSA_public_encrypt(strlen(message), (unsigned char*)message,
+            out, key, RSA_PKCS1_PADDING);
+    if (num != 256) {
+        printf("PKCS#1 v1.5 encryption failed!\n");
+        err = -1;
+    }
+
+    RSA_free(key);
+
+    *size = num;
+    return err;
+}
+
+static int _openssl_rsa_decrypt(uint8_t *out, uint32_t size, uint8_t *plain, uint32_t *length)
+{
+    uint32_t    clen = 0;
+    RSA         *key;
+
+    assert(out);
+    assert(plain);
+    assert(length);
+
+    key = RSA_new();
+    convert_key(key, &clen);
+    key->flags |= RSA_FLAG_NO_CONSTTIME;
+
+    *length = RSA_private_decrypt(
+            size, out, plain, key, RSA_PKCS1_PADDING);
+
+    RSA_free(key);
+
+    return 0;
+}
+
+static void _openssl_rsa_encrypt_decrypt()
+{
+    int         ret;
+    uint8_t     ctext[256];
+    uint32_t    size = 256;
+    uint8_t     plain[256] = {0};
+    uint32_t    length = 256;
+
+    _openssl_random_dump("message", (uint8_t*)message, (uint32_t)strlen(message));
+
+    ret = _openssl_rsa_encrypt(ctext, &size);
+    if (0 == ret) {
+        printf("PKCS #1 v1.5, OpenSSL Encrypto OK\n");
+    } else {
+        printf("PKCS #1 v1.5, OpenSSL Encrypto Fail\n");
+    }
+
+    _openssl_block_dump("rsa encrypto text", ctext, size);
+
+    ret = _openssl_rsa_decrypt(ctext, size, plain, &length);
+    if (0 == ret) {
+        printf("PKCS #1 v1.5, OpenSSL decrypto OK\n");
+    } else {
+        printf("PKCS #1 v1.5, OpenSSL decrypto fail\n");
+    }
+
+    _openssl_random_dump("plain", plain, length);
+}
+
+int main(void)
+{
+    _openssl_rsa_encrypt_decrypt();
+
+    _openssl_rsa_signature_verify();
 
     return 0;
 }
