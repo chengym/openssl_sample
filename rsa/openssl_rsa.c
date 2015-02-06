@@ -224,7 +224,7 @@ static void _openssl_random_dump(char *s, uint8_t *buf, uint32_t size)
 
         printf("0x%02x ", *(buf + i));
     }
-    printf("\n\n");
+    printf("\n");
 }
 
 static void _openssl_block_dump(char *s, uint8_t *buf, uint32_t size)
@@ -442,7 +442,7 @@ static void convert_key(RSA *key, uint32_t *key_len)
     *key_len = 256;
 }
 
-static int _openssl_rsa_encrypt(uint8_t *out, uint32_t *size)
+static int _openssl_rsa_pub_encrypt(uint8_t *out, uint32_t *size)
 {
     int         err = 0;
     int         num;
@@ -468,8 +468,53 @@ static int _openssl_rsa_encrypt(uint8_t *out, uint32_t *size)
     *size = num;
     return err;
 }
+static int _openssl_rsa_priv_encrypt(uint8_t *out, uint32_t *size)
+{
+    int         err = 0;
+    int         num;
+    uint32_t    clen = 0;
+    RSA         *key;
 
-static int _openssl_rsa_decrypt(uint8_t *out, uint32_t size, uint8_t *plain, uint32_t *length)
+    assert(out);
+    assert(size);
+
+    key = RSA_new();
+    convert_key(key, &clen);
+    key->flags |= RSA_FLAG_NO_CONSTTIME;
+
+    num = RSA_private_encrypt(strlen(message), (unsigned char*)message,
+            out, key, RSA_PKCS1_PADDING);
+    if (num != 256) {
+        printf("PKCS#1 v1.5 encryption failed!\n");
+        err = -1;
+    }
+
+    RSA_free(key);
+
+    *size = num;
+    return err;
+}
+static int _openssl_rsa_pub_decrypt(uint8_t *out, uint32_t size, uint8_t *plain, uint32_t *length)
+{
+    uint32_t    clen = 0;
+    RSA         *key;
+
+    assert(out);
+    assert(plain);
+    assert(length);
+
+    key = RSA_new();
+    convert_key(key, &clen);
+    key->flags |= RSA_FLAG_NO_CONSTTIME;
+
+    *length = RSA_public_decrypt(
+            size, out, plain, key, RSA_PKCS1_PADDING);
+
+    RSA_free(key);
+
+    return 0;
+}
+static int _openssl_rsa_priv_decrypt(uint8_t *out, uint32_t size, uint8_t *plain, uint32_t *length)
 {
     uint32_t    clen = 0;
     RSA         *key;
@@ -489,8 +534,7 @@ static int _openssl_rsa_decrypt(uint8_t *out, uint32_t size, uint8_t *plain, uin
 
     return 0;
 }
-
-static void _openssl_rsa_encrypt_decrypt()
+static void _openssl_rsa_pub_encrypt_priv_decrypt()
 {
     int         ret;
     uint8_t     ctext[256];
@@ -498,25 +542,55 @@ static void _openssl_rsa_encrypt_decrypt()
     uint8_t     plain[256] = {0};
     uint32_t    length = 256;
 
+    printf("Public key encryption, Private key decryption\n");
     _openssl_random_dump("message", (uint8_t*)message, (uint32_t)strlen(message));
 
-    ret = _openssl_rsa_encrypt(ctext, &size);
+    ret = _openssl_rsa_pub_encrypt(ctext, &size);
+    if (0 == ret) {
+        printf("PKCS #1 v1.5, OpenSSL Encrypto OK\n");
+    } else {
+        printf("PKCS #1 v1.5, OpenSSL Encrypto Fail\n");
+    }
+    ret = _openssl_rsa_priv_decrypt(ctext, size, plain, &length);
+    if (0 == ret) {
+        printf("PKCS #1 v1.5, OpenSSL decrypto OK\n");
+    } else {
+        printf("PKCS #1 v1.5, OpenSSL decrypto fail\n");
+    }
+    _openssl_random_dump("plain", plain, length);
+    printf("=============================================\n\n");
+}
+static void _openssl_rsa_priv_encrypt_pub_decrypt()
+{
+    int         ret;
+    uint8_t     ctext[256];
+    uint32_t    size = 256;
+    uint8_t     plain[256] = {0};
+    uint32_t    length = 256;
+
+    printf("Private key encryption, Public key decryption\n");
+    _openssl_random_dump("message", (uint8_t*)message, (uint32_t)strlen(message));
+
+    ret = _openssl_rsa_priv_encrypt(ctext, &size);
     if (0 == ret) {
         printf("PKCS #1 v1.5, OpenSSL Encrypto OK\n");
     } else {
         printf("PKCS #1 v1.5, OpenSSL Encrypto Fail\n");
     }
 
-    _openssl_block_dump("rsa encrypto text", ctext, size);
-
-    ret = _openssl_rsa_decrypt(ctext, size, plain, &length);
+    ret = _openssl_rsa_pub_decrypt(ctext, size, plain, &length);
     if (0 == ret) {
         printf("PKCS #1 v1.5, OpenSSL decrypto OK\n");
     } else {
         printf("PKCS #1 v1.5, OpenSSL decrypto fail\n");
     }
-
     _openssl_random_dump("plain", plain, length);
+    printf("=============================================\n\n");
+}
+static void _openssl_rsa_encrypt_decrypt()
+{
+    _openssl_rsa_pub_encrypt_priv_decrypt();
+    _openssl_rsa_priv_encrypt_pub_decrypt();
 }
 
 int main(void)
