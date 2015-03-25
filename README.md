@@ -1,2 +1,2 @@
 # openssl_sample
-常见加解密算法实例。
+Sample code for OpenSSL, include HASH/AES/RSA/DSA
